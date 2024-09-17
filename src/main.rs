@@ -6,7 +6,7 @@ mod config;
 mod log_parser;
 mod metrics;
 
-use config::{LogConfig, CHECK_INTERVAL};
+use config::CHECK_INTERVAL;
 use log_parser::parse_logs;
 use metrics::setup_metrics;
 
