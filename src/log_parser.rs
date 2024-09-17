@@ -5,6 +5,7 @@ use chrono::NaiveDateTime;
 use encoding_rs_io::DecodeReaderBytes;
 use glob::glob;
 use prometheus::IntCounterVec;
+use regex::Regex;
 
 use crate::config::LogConfig;
 
@@ -26,6 +27,11 @@ pub fn parse_logs(
         let mut buffer = String::new();
         let mut bytes_read = 0;
 
+        let stack_trace_regex = Regex::new(r"^\s+at ").unwrap();
+        let exception_regex = Regex::new(r"^[A-Za-z.]+Exception:").unwrap();
+        let mut in_stack_trace = false;
+        let mut current_severity = String::new();
+
         while let Ok(n) = decoder.read_to_string(&mut buffer) {
             if n == 0 {
                 break;
@@ -34,16 +40,22 @@ pub fn parse_logs(
 
             for line in buffer.lines() {
                 if let Some(captures) = config.regex.captures(line) {
-                    if let Some(time) = captures.name("time") {
+                    if let (Some(time), Some(severity)) = (captures.name("time"), captures.name("severity")) {
                         if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
-                            let severity = captures.name("severity").map_or("info", |m| m.as_str());
-                            log_count.with_label_values(&[&config.name, severity]).inc();
-                        } else {
-                            eprintln!("Failed to parse time: {} for log: {}", time.as_str(), config.name);
+                            log_count.with_label_values(&[&config.name, severity.as_str()]).inc();
+                            current_severity = severity.as_str().to_string();
+                            in_stack_trace = false;
                         }
                     }
-                } else {
-                    eprintln!("Failed to match regex for log: {} with line: {}", config.name, line);
+                } else if stack_trace_regex.is_match(line) || exception_regex.is_match(line) {
+                    if !in_stack_trace {
+                        log_count.with_label_values(&[&config.name, &current_severity]).inc();
+                        in_stack_trace = true;
+                    }
+                } else if !line.trim().is_empty() {
+                    // If it's not a recognized log format and not empty, count it as an unknown entry
+                    log_count.with_label_values(&[&config.name, "UNKNOWN"]).inc();
+                    in_stack_trace = false;
                 }
             }
             buffer.clear();
