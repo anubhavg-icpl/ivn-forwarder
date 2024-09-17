@@ -2,12 +2,22 @@
 name = "ivn-forwarder"
 version = "0.1.0"
 edition = "2021"
+authors = ["Anubhav Gain <iamanubhavgain@gmail.com>"]
+description = "A log parsing and metrics collection system for monitoring and analyzing logs from Infopercept services, particularly focusing on the Infopercept Visibility Suite (IVS) components."
+
+# Project overview:
+# IVN Forwarder is designed to parse logs from Infopercept services and expose
+# metrics in Prometheus format for seamless monitoring and analysis.
+
+repository = "https://github.com/anubhavg-icpl/ivn-forwarder"
+license = "MIT"
+keywords = ["log parsing", "metrics", "prometheus", "monitoring", "IVS", "Infopercept"]
 
 [dependencies]
-chrono = "0.4.38"
-encoding_rs = "0.8.34"
-encoding_rs_io = "0.1.7"
-glob = "0.3.1"
-prometheus = "0.13.4"
-prometheus_exporter = "0.8.5"
-regex = "1.10.6"
+chrono = "0.4.38"                  # For time and date management in log processing.
+encoding_rs = "0.8.34"              # Handles character encoding conversions.
+encoding_rs_io = "0.1.7"            # Works with encoding_rs for input/output streams.
+glob = "0.3.1"                      # To match log file paths with patterns.
+prometheus = "0.13.4"               # Prometheus client library for generating metrics.
+prometheus_exporter = "0.8.5"       # For exposing Prometheus metrics in HTTP.
+regex = "1.10.6"                    # For regular expression parsing of log files.
