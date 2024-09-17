@@ -1,12 +1,13 @@
 use prometheus_exporter::{self, prometheus::{register_int_counter_vec, IntCounterVec}};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
+use std::io::{self, Read, BufReader, Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use regex::Regex;
 use chrono::NaiveDateTime;
 use glob::glob;
+use encoding_rs_io::DecodeReaderBytes;
 
 const LOG_DIR: &str = r"C:\ProgramData\Infopercept\logs";
 const CHECK_INTERVAL: Duration = Duration::from_millis(100); // Check every 100ms
@@ -75,8 +76,20 @@ fn main() -> io::Result<()> {
         let guard = exporter.wait_duration(wait_time);
         
         // Update metrics
-        if let Err(e) = update_metrics(&log_configs, &mut file_positions, &log_count) {
-            eprintln!("Error updating metrics: {}", e);
+        for config in &log_configs {
+            match parse_logs(config, &mut file_positions, &log_count) {
+                Ok(_) => println!("Successfully parsed logs for {}", config.name),
+                Err(e) => {
+                    eprintln!("Error parsing logs for {}: {}", config.name, e);
+                    // Print the first few bytes of the file for debugging
+                    if let Ok(mut file) = File::open(&config.file_pattern) {
+                        let mut buffer = [0; 100];
+                        if let Ok(bytes_read) = file.read(&mut buffer) {
+                            eprintln!("First {} bytes of file: {:?}", bytes_read, &buffer[..bytes_read]);
+                        }
+                    }
+                }
+            }
         }
 
         // If a scrape occurred, the metrics have just been sent
@@ -84,19 +97,6 @@ fn main() -> io::Result<()> {
         
         last_check = Instant::now();
     }
-}
-
-fn update_metrics(
-    log_configs: &[LogConfig],
-    file_positions: &mut HashMap<String, u64>,
-    log_count: &IntCounterVec,
-) -> io::Result<()> {
-    for config in log_configs {
-        if let Err(e) = parse_logs(&config, file_positions, log_count) {
-            eprintln!("Error parsing logs for {}: {}", config.name, e);
-        }
-    }
-    Ok(())
 }
 
 fn parse_logs(
@@ -113,25 +113,41 @@ fn parse_logs(
         let mut reader = BufReader::new(file);
         reader.seek(SeekFrom::Start(*position))?;
 
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            if let Some(captures) = config.regex.captures(&line) {
-                if config.name == "osquery-install" || config.name == "wazuh-install" {
-                    if let Some(time) = captures.name("time") {
+        let mut decoder = DecodeReaderBytes::new(reader);
+        let mut buffer = String::new();
+        let mut bytes_read = 0;
+
+        while let Ok(n) = decoder.read_to_string(&mut buffer) {
+            if n == 0 {
+                break;
+            }
+            bytes_read += n;
+
+            for line in buffer.lines() {
+                if let Some(captures) = config.regex.captures(line) {
+                    if config.name == "osquery-install" || config.name == "wazuh-install" {
+                        if let Some(time) = captures.name("time") {
+                            if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
+                                log_count.with_label_values(&[&config.name, "info"]).inc();
+                            } else {
+                                eprintln!("Failed to parse time: {} for log: {}", time.as_str(), config.name);
+                            }
+                        }
+                    } else if let (Some(time), Some(severity)) = (captures.name("time"), captures.name("severity")) {
                         if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
-                            // For these logs, we'll count all entries as "info" severity
-                            log_count.with_label_values(&[&config.name, "info"]).inc();
+                            log_count.with_label_values(&[&config.name, severity.as_str()]).inc();
+                        } else {
+                            eprintln!("Failed to parse time: {} for log: {}", time.as_str(), config.name);
                         }
                     }
-                } else if let (Some(time), Some(severity)) = (captures.name("time"), captures.name("severity")) {
-                    if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
-                        log_count.with_label_values(&[&config.name, severity.as_str()]).inc();
-                    }
+                } else {
+                    eprintln!("Failed to match regex for log: {} with line: {}", config.name, line);
                 }
             }
-            line.clear(); // Clear the line for the next iteration
+            buffer.clear();
         }
-        *position = reader.stream_position()?;
+        
+        *position += bytes_read as u64;
     }
     Ok(())
 }
