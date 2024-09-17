@@ -56,14 +56,14 @@ fn main() -> io::Result<()> {
         LogConfig {
             name: "osquery-install".to_string(),
             file_pattern: format!(r"{}\osquery-install.log", LOG_DIR),
-            regex: Regex::new(r"=== (?P<message>.*) (?P<time>\d{2}/\d{2}/\d{4}  \d{2}:\d{2}:\d{2})  (?P<extra>.*)===$").unwrap(),
-            time_format: "%d/%m/%Y  %H:%M:%S".to_string(),
+            regex: Regex::new(r"=== (?P<message>.*) (?P<time>\d{2}-\d{2}-\d{4}  \d{2}:\d{2}:\d{2})  .*===").unwrap(),
+            time_format: "%d-%m-%Y  %H:%M:%S".to_string(),
         },
         LogConfig {
             name: "wazuh-install".to_string(),
             file_pattern: format!(r"{}\wazuh-install.log", LOG_DIR),
-            regex: Regex::new(r"=== (?P<message>.*) (?P<time>\d{2}/\d{2}/\d{4}  \d{2}:\d{2}:\d{2})  (?P<extra>.*)===$").unwrap(),
-            time_format: "%d/%m/%Y  %H:%M:%S".to_string(),
+            regex: Regex::new(r"=== (?P<message>.*) (?P<time>\d{2}-\d{2}-\d{4}  \d{2}:\d{2}:\d{2})  .*===").unwrap(),
+            time_format: "%d-%m-%Y  %H:%M:%S".to_string(),
         },
     ];
 
@@ -116,15 +116,16 @@ fn parse_logs(
         let mut line = String::new();
         while reader.read_line(&mut line)? > 0 {
             if let Some(captures) = config.regex.captures(&line) {
-                if let (Some(time), Some(severity)) = (captures.name("time"), captures.name("severity")) {
-                    if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
-                        log_count.with_label_values(&[&config.name, severity.as_str()]).inc();
-                    }
-                } else if config.name == "osquery-install" || config.name == "wazuh-install" {
+                if config.name == "osquery-install" || config.name == "wazuh-install" {
                     if let Some(time) = captures.name("time") {
                         if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
+                            // For these logs, we'll count all entries as "info" severity
                             log_count.with_label_values(&[&config.name, "info"]).inc();
                         }
+                    }
+                } else if let (Some(time), Some(severity)) = (captures.name("time"), captures.name("severity")) {
+                    if NaiveDateTime::parse_from_str(time.as_str(), &config.time_format).is_ok() {
+                        log_count.with_label_values(&[&config.name, severity.as_str()]).inc();
                     }
                 }
             }
